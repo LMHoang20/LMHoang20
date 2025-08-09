@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import nodemailer from "nodemailer";
 
 export const config = {
 	runtime: "edge",
@@ -42,7 +43,7 @@ export default async function recruiterContact(
 			return new NextResponse("Invalid email format", { status: 400 });
 		}
 
-		// Log the form submission (in a real app, you'd save to database or send email)
+		// Log the form submission
 		console.log("Recruiter contact form submission:", {
 			timestamp: new Date().toISOString(),
 			name,
@@ -54,12 +55,33 @@ export default async function recruiterContact(
 			ip: req.ip,
 		});
 
-		// In a production app, you would:
-		// 1. Save to database
-		// 2. Send email notification
-		// 3. Send auto-reply with requested information
+		// Retrieve your email from environment variables
+		const recipientEmail = process.env.RECIPIENT_EMAIL;
+		if (!recipientEmail) {
+			console.error("Recipient email is not set in environment variables.");
+			return new NextResponse("Internal server error", { status: 500 });
+		}
 
-		// For now, we'll just return success
+		// Configure nodemailer
+		const transporter = nodemailer.createTransport({
+			service: "gmail",
+			auth: {
+				user: process.env.EMAIL_USER,
+				pass: process.env.EMAIL_PASS,
+			},
+		});
+
+		const mailOptions = {
+			from: process.env.EMAIL_USER,
+			to: recipientEmail,
+			subject: `Recruiter Contact Form Submission from ${name}`,
+			text: `Name: ${name}\nEmail: ${email}\nCompany: ${company}\nPosition: ${position}\nMessage: ${message}\nRequested Info: ${requestedInfo.join(
+				", ",
+			)}`,
+		};
+
+		await transporter.sendMail(mailOptions);
+
 		const response = {
 			success: true,
 			message:
