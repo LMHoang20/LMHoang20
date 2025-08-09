@@ -36,15 +36,19 @@ export const Header: React.FC<Props> = ({ project, views }) => {
 			className="relative overflow-visible bg-gradient-to-tl from-black via-zinc-900 to-black"
 		>
 			<div className="absolute inset-x-0 top-0 h-[120%] bg-gradient-to-b from-zinc-900/80 via-zinc-900/40 to-transparent pointer-events-none z-[1]" />
-			
+
 			<div
-				className={"fixed inset-x-0 top-0 z-[9999] backdrop-blur lg:backdrop-blur-none duration-200 border-b lg:bg-transparent bg-zinc-900/0 border-transparent"}
+				className={
+					"fixed inset-x-0 top-0 z-[9999] backdrop-blur lg:backdrop-blur-none duration-200 border-b lg:bg-transparent bg-zinc-900/0 border-transparent"
+				}
 			>
 				<div className="container flex flex-row-reverse items-center justify-between p-6 mx-auto">
 					<div className="flex justify-between gap-8">
 						<span
 							title="View counter for this page"
-							className={"duration-200 hover:font-medium flex items-center gap-1 text-zinc-500 hover:text-zinc-100"}
+							className={
+								"duration-200 hover:font-medium flex items-center gap-1 text-zinc-500 hover:text-zinc-100"
+							}
 						>
 							<Eye className="w-5 h-5" />{" "}
 							{Intl.NumberFormat("en-US", { notation: "compact" }).format(
@@ -53,19 +57,25 @@ export const Header: React.FC<Props> = ({ project, views }) => {
 						</span>
 						<Link target="_blank" href="https://linkedin.com/in/lmhoang20">
 							<Linkedin
-								className={"w-6 h-6 duration-200 hover:font-medium text-zinc-500 hover:text-zinc-100"}
+								className={
+									"w-6 h-6 duration-200 hover:font-medium text-zinc-500 hover:text-zinc-100"
+								}
 							/>
 						</Link>
 						<Link target="_blank" href="https://github.com/LMHoang20">
 							<Github
-								className={"w-6 h-6 duration-200 hover:font-medium text-zinc-500 hover:text-zinc-100"}
+								className={
+									"w-6 h-6 duration-200 hover:font-medium text-zinc-500 hover:text-zinc-100"
+								}
 							/>
 						</Link>
 					</div>
 
 					<Link
 						href="/projects"
-						className={"duration-200 hover:font-medium text-zinc-500 hover:text-zinc-100"}
+						className={
+							"duration-200 hover:font-medium text-zinc-500 hover:text-zinc-100"
+						}
 					>
 						<ArrowLeft className="w-6 h-6 " />
 					</Link>

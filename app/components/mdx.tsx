@@ -63,8 +63,9 @@ const components = {
 		/>
 	),
 	a: ({ className, href, ...props }) => {
-		const isExternal = href && (href.startsWith('http') || href.startsWith('https'));
-		
+		const isExternal =
+			href && (href.startsWith("http") || href.startsWith("https"));
+
 		if (isExternal) {
 			return (
 				<a
@@ -79,7 +80,7 @@ const components = {
 				/>
 			);
 		}
-		
+
 		return (
 			<Link
 				className={clsx(

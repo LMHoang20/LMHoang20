@@ -1,9 +1,5 @@
 "use client";
-import {
-	motion,
-	useMotionTemplate,
-	useSpring,
-} from "framer-motion";
+import { motion, useMotionTemplate, useSpring } from "framer-motion";
 
 import { PropsWithChildren } from "react";
 
@@ -13,7 +9,12 @@ interface CardProps extends PropsWithChildren {
 	staticGlow?: boolean;
 }
 
-export const Card: React.FC<CardProps> = ({ children, glowColor = "from-zinc-100/10 via-zinc-100/5 to-transparent", disableGlow = false, staticGlow = false }) => {
+export const Card: React.FC<CardProps> = ({
+	children,
+	glowColor = "from-zinc-100/10 via-zinc-100/5 to-transparent",
+	disableGlow = false,
+	staticGlow = false,
+}) => {
 	const mouseX = useSpring(0, { stiffness: 500, damping: 100 });
 	const mouseY = useSpring(0, { stiffness: 500, damping: 100 });
 
@@ -31,9 +32,13 @@ export const Card: React.FC<CardProps> = ({ children, glowColor = "from-zinc-100
 	}
 
 	const maskImage = useMotionTemplate`radial-gradient(240px at ${mouseX}px ${mouseY}px, white, transparent)`;
-	const staticMaskImage = "radial-gradient(240px at 0px 0px, white, transparent)";
+	const staticMaskImage =
+		"radial-gradient(240px at 0px 0px, white, transparent)";
 	const dynamicStyle = { maskImage, WebkitMaskImage: maskImage };
-	const staticStyle = { maskImage: staticMaskImage, WebkitMaskImage: staticMaskImage };
+	const staticStyle = {
+		maskImage: staticMaskImage,
+		WebkitMaskImage: staticMaskImage,
+	};
 
 	return (
 		<div

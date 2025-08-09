@@ -35,7 +35,7 @@ const socials = [
 		label: "LeetCode (Guardian)",
 		handle: "LMHoang1312",
 		glowColor: "from-yellow-500/20 via-yellow-400/10 to-transparent",
-	}
+	},
 ];
 
 export default function Example() {
@@ -50,8 +50,8 @@ export default function Example() {
 								Let's Connect
 							</h1>
 							<p className="text-lg text-zinc-400 max-w-2xl mx-auto">
-								Whether you're a recruiter with exciting opportunities or just want to connect, 
-								I'm always open to meaningful conversations.
+								Whether you're a recruiter with exciting opportunities or just
+								want to connect, I'm always open to meaningful conversations.
 							</p>
 						</div>
 
