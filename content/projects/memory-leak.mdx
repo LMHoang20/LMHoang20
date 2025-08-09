@@ -24,7 +24,7 @@ Side note: I was also puzzled to see memory utilization peak at over 100%. Thatâ
 
 ---
 
-### Heap profiling with `pprof`
+### Heap profiling with pprof
 
 Back to the leak. A bit of Googling led me to this article about [Goâ€™s built-in pprof tool](https://go.dev/blog/pprof). After reading it, I realized I could re-run the load test and collect heap profiles during and after execution. That would help identify which part of the system was consuming memory and failing to release it.
 
