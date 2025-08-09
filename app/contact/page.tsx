@@ -47,7 +47,7 @@ export default function Example() {
 					<div className="w-full max-w-6xl mx-auto mt-24 mb-16">
 						<div className="text-center mb-16 mt-32 sm:mt-0">
 							<h1 className="text-4xl md:text-6xl font-bold text-zinc-200 mb-4">
-								Let's Connect
+								Contact
 							</h1>
 							<p className="text-lg text-zinc-400 max-w-2xl mx-auto">
 								Whether you're a recruiter with exciting opportunities or just

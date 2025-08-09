@@ -4,7 +4,7 @@ import Link from "next/link";
 import React, { useEffect, useRef, useState } from "react";
 
 const navigation = [
-	{ name: "Home", href: "/home" },
+	{ name: "Home", href: "/" },
 	{ name: "Projects", href: "/projects" },
 	{ name: "Contact", href: "/contact" },
 ];

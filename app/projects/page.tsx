@@ -20,7 +20,7 @@ export default async function ProjectsPage() {
 		return acc;
 	}, {} as Record<string, number>);
 
-	const pinnedProjects = allProjects.filter((p) => p.pinned);
+	const pinnedProjects = allProjects.filter((p) => p.published && p.pinned);
 
 	const sorted = allProjects
 		.filter((p) => p.published)
