@@ -1,0 +1,134 @@
+---
+title: "@GFG/Memory Leak"
+description: Sneaky memory leak when using Redis in Go.
+date: "2024-10-24"
+published: true
+pinned: true
+---
+
+### A Little Bit of Background
+
+I’m currently working on a Go project at GFG, primarily focused on processing product changes. While writing a load test to benchmark our NodeJS-to-Go migration, I noticed that the processing speed seemed to degrade after every run.
+
+After thoroughly checking my code and finding nothing obviously wrong, I turned to AWS CloudWatch to investigate further.
+
+---
+
+### Investigation
+
+![Leak Graph](/memory-leak-1.png)
+
+This graph is the textbook example of a memory leak. As a Go fanboy, I didn’t even realize that memory leaks were possible in Go, I genuinely believed the magical garbage collector would handle everything.
+
+Side note: I was also puzzled to see memory utilization peak at over 100%. That’s because the server is hosted on ECS, which is essentially an EC2 instance partitioned into multiple services. In this setup, resource limits are soft constraints based on the allocated configuration. For example, our server was allocated 4GB on a 16GB ECS. If other services are using minimal memory, utilization can spike up to 400% before crashing the container.
+
+---
+
+### Heap profiling with `pprof`
+
+Back to the leak. A bit of Googling led me to this article about [Go’s built-in pprof tool](https://go.dev/blog/pprof). After reading it, I realized I could re-run the load test and collect heap profiles during and after execution. That would help identify which part of the system was consuming memory and failing to release it.
+
+I tried running this locally. After opening up the `6060` debug port, tweaking the load, rerouting the test, and running:
+
+```bash
+go tool pprof http://localhost:6060/debug/pprof/heap
+```
+
+I successfully generated the expected memory profile. However, the difference between the before and after states wasn’t pronounced enough to spot the leak easily. Pushing the load higher crashed my Intel Mac, so I had to move the test to the Staging environment.
+
+Unfortunately, I didn’t have direct access to the container running the server, so SSH’ing and performing the same steps wasn't an option. On the other hand, exposing the `6060` port publicly was off the table due to obvious security concerns.
+
+After more research, I found an alternative: capturing the memory profile from within the process itself. So, I quickly coded an API that dumps the result to an S3 bucket one configured for access only from my account.
+
+```go
+buf := new(bytes.Buffer)
+if err := pprof.WriteHeapProfile(buf); err != nil {
+  fmt.Printf("Monitor Memory WriteHeapProfile error: %v\n", err)
+  return err
+}
+if _, err := s3.SaveFile(
+  config.Bucket,
+  fmt.Sprintf("%s/%s", logType, "heap_"+time.Now().Format("2006_01_02_15_04_05")),
+  buf.Bytes(),
+); err != nil {
+  return err
+}
+```
+
+After setting everything up running the load test, capturing the profile every 30 seconds, and doing a bit of pre-over-engineering I didn’t even need to compare before and after states. The first profiling snapshot made the issue obvious.
+
+![Leak Graph](/memory-leak-2.png)
+
+I can’t show the entire image, but believe me every other node was insignificant compared to _this_ one.
+
+---
+
+### Redis Pool Misuse
+
+Tracing the memory spike led me to how Redis connections were being created:
+
+```go
+func CreateRedisProducer(name string) *producer {
+  // get configs
+  // ...
+  client := redis.NewClient(&redis.Options{
+    Addr:        redisConfig.Addr,
+    PoolSize:    1,
+    ReadTimeout: redisConfig.ReadTimeout * time.Second,
+  })
+  // setup the producer
+  // ...
+  return &producer{ client }
+}
+```
+
+This setup is fine **if and only if** you properly close the client with `client.Close()` afterward.
+Since Go doesn’t have destructors, the caller is responsible for calling `defer producer.client.Close()` to ensure the connection is closed.
+Usually, the idiomatic way to do this is to
+
+- Wrap the `producer` inside a `Producer` interface that implements `io.Closer`.
+- Promote the `Close()` method of `client` to `producer`.
+
+However, because the connection is wrapped inside a `producer` object, without exposing `Close()`, the caller can not close the pool.
+
+~~Thankfully~~, it turned out to be a misunderstanding of **Redis Connection** vs **Redis Pool**.
+The correct usecase for this `redis.NewClient` method is to create a global [Singleton](https://en.wikipedia.org/wiki/Singleton_pattern) pool to be used indefinitely.
+
+So, to fix this, I initialize a pool with, for example, 100 connections at start. Then return that same client whenever needed.
+
+```go
+// === globalStorage.go ===
+
+var (
+    redisClient *redis.Client
+    once        sync.Once
+)
+
+func GetRedisClient() *redis.Client {
+    once.Do(func() {
+        redisClient = redis.NewClient(&redis.Options{
+            Addr:        redisConfig.Addr,
+            PoolSize:    100,
+            ReadTimeout: redisConfig.ReadTimeout * time.Second,
+        })
+    })
+    return redisClient
+}
+
+// === producer.go ===
+
+func CreateRedisProducer(name string) *producer {
+  // get configs
+  // ...
+  client := globalStorage.GetRedisClient() // Use the singleton client
+  // setup the producer
+  // ...
+  return &producer{ client }
+}
+```
+
+---
+
+### Conclusion
+
+**Vibe coding would've never had this problem.**

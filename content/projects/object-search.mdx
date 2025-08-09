@@ -1,0 +1,312 @@
+---
+title: "@AIC23/Image Object Search Engine"
+description: How to search for objects inside an image?
+repository: LMHoang20/AIC-Object-search
+date: "2023-10-27"
+published: true
+pinned: false
+---
+
+### Ho Chi Minh City AI Challenge 2023
+
+My team and I (ATISO) are participating in the [HCM's AI Challenge 2023](https://aichallenge.hochiminhcity.gov.vn/),
+which is basically a known-item-search competition as it has been the topic for ~2~ ~3~ 4 years in a row now.
+
+Each team is given the same dataset, consisting of 100GB of images and videos.
+
+1. Given a text query/description, find the frames in the dataset that fit the description.
+2. Given a short clip, find the frames shown in that clip.
+
+I mainly take care of algorithmic search methods as opposed to
+the rest of my team doing vector search with vision AI models like [CLIP](https://github.com/openai/CLIP).
+In this blog, I want to share my algorithm to do semantic search for frames with some given objects.
+
+#### Problem Formulation
+
+Given a dataset $D$ of frames extracted from 100GB of media and a query of `entity-occurences` pairs like this:
+
+```json
+{
+  "animal": 4,
+  "table": 3,
+  "person": "any"
+}
+```
+
+Find top $K$ frames that best fit the description of the query, which means having the correct entities with their correct occurrences.
+
+In this case, find all frames that have 4 animals, 3 tables, and any number of people. The result can have some fuzziness as frames with 5 animals and 2 tables might also be a good candidate.
+
+#### Object Detection
+
+Each image is first passed through a typical Object Detection (OD) model like the [YOLO family](https://docs.ultralytics.com/models/).
+Then, do some number tweaking with `Intersection-over-Union (IoU)` and `Non-Maximum Suppression (NMS)`.
+
+The result would be something like this. Just some classic boxes, with confidence and label.
+
+```json
+{
+  "detections": [
+    {
+      "label": "person",
+      "confidence": 0.97,
+      "bbox": {
+        "xmin": 120,
+        "ymin": 50,
+        "xmax": 200,
+        "ymax": 400
+      }
+    },
+    {
+      "label": "dog",
+      "confidence": 0.88,
+      "bbox": {
+        "xmin": 300,
+        "ymin": 200,
+        "xmax": 450,
+        "ymax": 380
+      }
+    }
+  ]
+}
+```
+
+![Object detection example](https://www.visionplatform.ai/wp-content/uploads/2024/01/object-detection.png)
+
+#### WordNet
+
+Earlier this year I stumbled across something called a [WordNet](https://wordnet.princeton.edu/).
+
+Basically, this project aims to organize words based on their meaning.
+With it, you can do things like computing the similarity score between 2 words like "king" and "queen", or "man" and "woman".
+
+![](https://www.cs.princeton.edu/courses/archive/spr08/cos226/assignments/wordnet-fig1.png)
+
+There is a feature of it called `hypernym`. A word `A` is a hypernym of `B` if what `A` describes fully contain what `B` describes.
+As you might imagine, this sounds like a tree. Indeed, from each word, you can go up the `hypernym_path` to get to the root.
+
+As shown in the image, `entity` is the root of everything.
+Things that are common like `carrot` and `radish` are in the `plant root` subtree. `cat` and `dog` might also be in the same `animal` subtree.
+
+Now, some of the example queries given by the organizers contain some generic things like:
+
+```
+A girl in blue jeans playing with her animals
+```
+
+The animal can be anything, a dog, a cat, or even a pet alligator (shout out to Florida). The best query for this would be
+
+```json
+{
+  "person": 1,
+  "animal": "any"
+}
+```
+
+OD models usually have a list of labels that they can detect. For `YOLO`, the list looks something like this:
+
+```json
+{
+    "0": "_background_",
+    "1": "person",
+    "2": "bicycle",
+    "3": "car",
+    "4": "motorcycle",
+    "5": "airplane",
+    ...
+}
+```
+
+As you can see, they usually predict some _exact_ things, so searching for something like `vehicle` directly would not get images
+containing `bicycle` or `car`. Similarly, searching for `animal` would not get `cat` and `dog`.
+
+To solve this problem, what if we can construct a tree with `hypernyms`?
+When searching for `vehicle`, we can returns results containg all types of vehicles by searching everything under its subtree.
+
+#### Building the Hypernym Tree
+
+For each object in the model's object map, we can get its hypernym path and build the tree from there.
+
+```py
+def get_hypernym_path(object):
+  synset = wn.synsets(object, 'n')
+  if len(synset) == 0:
+    hypernym_path = ["entity", object]
+  else:
+    hypernym_path = [
+      s.name()[:-5] # dog.n.01 -> dog
+      for s in synset[0].hypernym_paths()[0]
+    ]
+  return hypernym_path
+```
+
+For each frame, we can extract each object, go down the tree path corresponding to that object, and add the frame.
+A node of a tree has this structure:
+
+```py
+class NodeFrame:
+  # ...
+  def __init__(self, frame: Frame, p_list: list[float]) -> None:
+    self.frame = frame
+    self.p_list = p_list
+
+class Node:
+  # ...
+  def __init__(self, node_frames: list[NodeFrame]) -> None:
+    self.node_frames = node_frames
+    self.children = {}
+```
+
+The insert algorithm is as typical as any tree building you can find online.
+
+```py
+class Trie:
+  # ...
+  def insert(self, node_frame: NodeFrame, path: list[str]) -> None:
+    node = self.root
+    for word in path:
+        if word not in node.children:
+            node.children[word] = Node([])
+        node = node.children[word]
+    node.node_frames.append(node_frame)
+```
+
+Note that I called the tree a [Trie](https://en.wikipedia.org/wiki/Trie), which is a usual data structure to do prefix text search on a dictionary.
+I don't know if the name is appropriate in this situation, but the idea is the same.
+
+Anyway, for a query, we can search for all frames in the object's subtree, then give each frame a score.
+
+```py
+for q in query:
+  this_candidates: list[Candidate] = []
+  object, amount = q
+  hypernym_path = get_hypernym_path(object)
+  node_frames = self.trie.search(hypernym_path)
+  if amount == 'any':
+    this_candidates.extend([Candidate(node_frame.frame, node_frame.p_total()) for node_frame in node_frames])
+  elif amount == int(amount):
+    this_candidates.extend([Candidate(node_frame.frame, node_frame.p_of(amount) * amount) for node_frame in node_frames])
+```
+
+### Aggregating score for multiple objects
+
+As you might notice, the `node_frame.p_total()` and `node_frame.p_of(amount) * amount` is the score for each frame. I'll explain with some math.
+
+#### Calculating the probability of an image having exactly $K$ objects
+
+Let's say from the OD result run on a frame with 2 dogs, but we get 3 instances of dog like this:
+
+```json
+[
+  { "label": "dog", "confidence": 0.88 },
+  { "label": "dog", "confidence": 0.95 },
+  { "label": "dog", "confidence": 0.12 }
+]
+```
+
+We have 3 individual confidences for each dog in the frame,
+the model somehow finds another dog but is very unconfident that it is a dog. Without pulling up the image itself to confirm,
+what's the probability that the frame actually has 3 dogs? Well, it would be:
+
+$$P(X = 3) = 0.88 \cdot 0.95 \cdot 0.12 = 0.10$$
+
+You can see that it is very unlikely that there are 3 dogs. What's the probability that we actually have 2 dogs then?
+
+$$P(X = 2) = \\ 0.88 \cdot 0.95 \cdot (1 - 0.12) + \\ 0.88 \cdot (1 - 0.95) \cdot 0.12 + \\ (1 - 0.88) \cdot 0.95 \cdot 0.12 = 0.75$$
+
+It is much more likely that the image has 2 dogs.
+
+To wrap up, what's the probability that we actually have 1 dog or none then?
+
+$$P(X = 1) = \\ (0.88 \cdot (1 - 0.95) \cdot (1 - 0.12)) + \\ ((1 - 0.88) \cdot 0.95 \cdot (1 - 0.12)) + \\ ((1 - 0.88) \cdot (1 - 0.95) \cdot 0.12) = 0.15$$
+
+$$P(X = 0) = (1 - 0.88) \cdot (1 - 0.95) \cdot (1 - 0.12) = 0.00$$
+
+If you are familiar with [Generating Functions](https://en.wikipedia.org/wiki/Generating_function), you would be able to come up with this idea of using this function:
+
+$$ ((1 - 0.88) + 0.88t) \cdot ((1 - 0.95) + 0.95t) \cdot ((1 - 0.12) + 0.12t) $$
+
+If you work this out, you would find the coefficient corresponding to $t^k$ is the probability of the image having $k$ dogs.
+
+$$ 0.00 + 0.15t + 0.75t^2 + 0.10t^3 $$
+
+Generalizing that, we get the algorithm uses probability theory to calculate the likelihood of finding specific objects in images. For a set of objects with detection probabilities $p_1, p_2, \ldots, p_n$, the probability distribution follows:
+
+$$P(X = k) = \text{coeff of } t^k \text{ in } \prod_{i=1}^{n} (1 - p_i + p_i \cdot t)$$
+
+Where $X$ represents the number of objects detected in the image.
+
+```py
+class NodeFrame:
+  def __init__(self, frame: Frame, p_list: list[float]) -> None:
+    self.frame = frame
+    self.p_list = p_list
+    self.p_total = self.calculate_p_total(p_list)
+    self.p_exactly = self.calculate_p_exactly(p_list)
+
+  def calculate_p_total(self, p_list: list[float]) -> float:
+    return sum(p_list)
+
+  def calculate_p_exactly(self, p_list: list[float]) -> list[float]:
+    result = [1]
+    p_list = [[1 - p, p] for p in p_list]
+    for p in p_list:
+      result = polynomial.polymul(result, p)
+    return list(result)
+
+  def p_of(self, amount: int) -> float:
+    if amount < len(self.p_exactly):
+      return self.p_exactly[amount]
+    else:
+      return 0
+```
+
+### Final Scoring Function
+
+For `{ "dog": "any" }`, I use $\sum_i^X p_i$, which is the [Expected Value](https://en.wikipedia.org/wiki/Expected_value) of dogs in the frame.
+
+For query with exact number like `{ "dog": 3 }`, I use the probability of the image having exactly 3 dogs as the score times 3.
+This is to align the scale of both scores. As you can see, both functions have the same output range of $[0, 3]$.
+
+To merge the score of multiple objects, I just sum the score for each object plus some bonus for matching multiple objects.
+
+$$ \textrm{S}(f) = \sum_o^q (\textrm{score}(o, f) + \textrm{BONUS} \cdot (\textrm{score}(o, f) > 0)) $$
+
+Where $S$ is the scoring function, $f$ is a frame, $q$ is the query, $o$ is an object in the query and $\textrm{BONUS}$ is a constant bonus for multiple objects.
+
+### Performance at AIC'23
+
+This is the first year we participate in AIC, so we didn't have a clear direction on what to do.
+We ended up having 4 different search methods: CLIP, BEIT3, OCR Search, and this Object Search.
+
+In the preliminary rounds, there were queries that are plausible to find with Object Search like these:
+
+```
+Đoạn video những đồ dùng/đồ chơi bằng nhựa đang được trang trí trên bàn. Trong số những đồ vật bày trí trên bàn có 3 cái muỗng, 2 cái bàn chải đánh răng và có một bó lúa trang trí.
+```
+
+![Query Result](/spoons.png)
+
+Funny how the result from YOLO does have 3 spoons, just not on the correct object. Also, tooth brushes are forks now.
+
+Sadly, in the finals, most of the queries can be solved by just input the text into CLIP, do a vector search, and quickly scan the top 100 candidates.
+Also, not many queries can be solved with Object Search due to how broad they are:
+
+```
+Cảnh một người mặc áo vàng, cổ áo viền đen, đang trả lời phỏng vấn.
+```
+
+We ended up in $15^{th}$ place, got an honorable mention, and a paper published.
+
+The full ATISO solution can be found [here](https://dl.acm.org/doi/10.1145/3628797.3628997).
+
+### Conclusion
+
+Prior to this experience at AIC, I had never touched an AI model before,
+so I had little to no help with the AI search methods.
+
+However, I learned a lot from this, like how Object Detection works and how a Search Engine is typically implemented.
+I also get new motivation to learn AI as algorithmic methods are becoming increasingly obsolete as AI models getting better.
+Looking at the code from my teammates, I now also know how to set up an AI embedding model endpoint, search with Vector Database, and things like Contrastive Learning in CLIP models, etc.
+
+Stay tuned for my journey at **Ho Chi Minh AI Challenge 2024**.
